@@ -29,6 +29,10 @@ npm run dev
 - Node.js 20+
 - モダンブラウザ（WebAssembly + WebGL対応）
 
+### macOS: ワンクリック起動
+
+Finderで **`start.command`** をダブルクリックするだけで、依存のインストール（初回のみ）→ サーバー起動 → ブラウザ自動オープン まで自動で走ります。
+
 ## 使い方
 
 1. `npm run dev` で起動し `http://localhost:3000` を開く
