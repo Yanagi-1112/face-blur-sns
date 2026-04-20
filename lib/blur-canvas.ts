@@ -52,17 +52,43 @@ export function canvasToBlob(canvas: HTMLCanvasElement, mime = 'image/jpeg', qua
   });
 }
 
-export function loadImage(file: File): Promise<HTMLImageElement> {
+function isHeic(file: File): boolean {
+  return (
+    /\.hei[cf]$/i.test(file.name) ||
+    file.type === 'image/heic' ||
+    file.type === 'image/heif' ||
+    file.type === 'image/heic-sequence' ||
+    file.type === 'image/heif-sequence'
+  );
+}
+
+async function decodeHeic(file: File): Promise<Blob> {
+  const { heicTo } = await import('heic-to');
+  return heicTo({ blob: file, type: 'image/jpeg', quality: 0.92 });
+}
+
+export async function fileToImageBlob(file: File): Promise<Blob> {
+  if (isHeic(file)) {
+    return decodeHeic(file);
+  }
+  return file;
+}
+
+export function loadImage(source: Blob): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
+    const url = URL.createObjectURL(source);
     const img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
+      if (img.naturalWidth === 0 || img.naturalHeight === 0) {
+        reject(new Error('画像の読み込みに失敗しました（形式未対応の可能性）'));
+        return;
+      }
       resolve(img);
     };
-    img.onerror = (e) => {
+    img.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(e);
+      reject(new Error('画像の読み込みに失敗しました'));
     };
     img.src = url;
   });

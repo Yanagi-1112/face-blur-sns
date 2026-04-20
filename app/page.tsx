@@ -6,7 +6,7 @@ import { saveAs } from 'file-saver';
 import { DropZone } from '@/components/DropZone';
 import { ImagePreview } from '@/components/ImagePreview';
 import { detectFaces, getDetector } from '@/lib/face-detector';
-import { applyBlurToFaces, canvasToBlob, loadImage } from '@/lib/blur-canvas';
+import { applyBlurToFaces, canvasToBlob, fileToImageBlob, loadImage } from '@/lib/blur-canvas';
 
 type ProcessedImage = {
   id: string;
@@ -71,15 +71,16 @@ export default function Home() {
       const file = files[i];
       setProgress(`${i + 1}/${files.length}`);
       try {
-        const img = await loadImage(file);
+        const inputBlob = await fileToImageBlob(file);
+        const img = await loadImage(inputBlob);
         const boxes = await detectFaces(img);
         const canvas = applyBlurToFaces(img, boxes);
-        const blob = await canvasToBlob(canvas, 'image/jpeg', 0.92);
+        const outputBlob = await canvasToBlob(canvas, 'image/jpeg', 0.92);
         processed.push({
           id: crypto.randomUUID(),
           fileName: file.name,
-          blurredUrl: URL.createObjectURL(blob),
-          blob,
+          blurredUrl: URL.createObjectURL(outputBlob),
+          blob: outputBlob,
           faceCount: boxes.length,
         });
       } catch (e) {

@@ -14,7 +14,9 @@ export function DropZone({ onFiles, disabled = false }: Props) {
   const handleFiles = useCallback(
     (list: FileList | null) => {
       if (!list) return;
-      const images = Array.from(list).filter((f) => f.type.startsWith('image/'));
+      const images = Array.from(list).filter(
+        (f) => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name),
+      );
       if (images.length > 0) onFiles(images);
     },
     [onFiles],
@@ -56,7 +58,7 @@ export function DropZone({ onFiles, disabled = false }: Props) {
       <input
         ref={inputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
         multiple
         className="hidden"
         onChange={(e) => {
