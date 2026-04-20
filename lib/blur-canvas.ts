@@ -20,21 +20,17 @@ export function applyBlurToFaces(img: HTMLImageElement, boxes: BBox[]): HTMLCanv
   ctx.drawImage(img, 0, 0);
 
   for (const box of boxes) {
-    const padded = expandBox(box, 1.4, canvas.width, canvas.height);
-    const radius = Math.max(20, Math.min(padded.w, padded.h) * 0.25);
+    const padded = expandBox(box, 1.08, canvas.width, canvas.height);
+    const cx = padded.x + padded.w / 2;
+    const cy = padded.y + padded.h / 2;
+    // 顔領域にフィットする正円の半径（短辺の55%程度）
+    const clipR = Math.min(padded.w, padded.h) * 0.55;
+    const blurR = Math.max(16, clipR * 0.5);
     ctx.save();
     ctx.beginPath();
-    ctx.ellipse(
-      padded.x + padded.w / 2,
-      padded.y + padded.h / 2,
-      padded.w / 2,
-      padded.h / 2,
-      0,
-      0,
-      Math.PI * 2,
-    );
+    ctx.arc(cx, cy, clipR, 0, Math.PI * 2);
     ctx.clip();
-    ctx.filter = `blur(${radius}px)`;
+    ctx.filter = `blur(${blurR}px)`;
     ctx.drawImage(img, 0, 0);
     ctx.restore();
   }

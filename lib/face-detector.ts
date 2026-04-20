@@ -140,28 +140,31 @@ async function detectTiled(
   return all;
 }
 
+// 顔として妥当かを形状・信頼度・サイズで判定
+function isPlausibleFace(b: BBox, imgW: number, imgH: number): boolean {
+  const aspect = b.w / b.h;
+  if (aspect < 0.6 || aspect > 1.6) return false;
+  const minSide = Math.min(imgW, imgH);
+  if (Math.min(b.w, b.h) < minSide * 0.01) return false;
+  if (Math.min(b.w, b.h) < 14) return false;
+  // 信頼度が低い候補は、十分に大きい場合のみ採用（小さくて低信頼は誤検出率高）
+  if (b.score < 0.42 && Math.min(b.w, b.h) < minSide * 0.025) return false;
+  return true;
+}
+
 export async function detectFaces(img: HTMLImageElement): Promise<BBox[]> {
   const detector = await getDetector();
   const maxSide = Math.max(img.naturalWidth, img.naturalHeight);
   const all: BBox[] = [];
 
-  // 常に1xフル画像で検出（大きい顔・中間距離の顔を捕捉）
   all.push(...(await detectFullScale(detector, img, 1)));
 
-  // 小さい画像ではアップスケールして再検出
-  if (maxSide < 1500) {
-    all.push(...(await detectFullScale(detector, img, 2.2)));
-  }
-
-  // 大きい画像ではタイル分割で奥の小顔を検出（2段階タイル）
+  // タイル分割で奥の小顔を拾う。小さめのタイル+高オーバーラップで小顔の相対サイズを稼ぐ
   if (maxSide >= 1200) {
-    const tileSize = maxSide >= 2400 ? 800 : 640;
-    all.push(...(await detectTiled(detector, img, tileSize, 0.4)));
-    // さらに細かいタイルでもう1パス
-    if (maxSide >= 2000) {
-      all.push(...(await detectTiled(detector, img, Math.round(tileSize * 0.6), 0.4)));
-    }
+    const tileSize = maxSide >= 2400 ? 600 : maxSide >= 1800 ? 500 : 400;
+    all.push(...(await detectTiled(detector, img, tileSize, 0.35)));
   }
 
-  return nonMaxSuppression(all, 0.25);
+  const deduped = nonMaxSuppression(all, 0.3);
+  return deduped.filter((b) => isPlausibleFace(b, img.naturalWidth, img.naturalHeight));
 }
