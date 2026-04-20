@@ -1,4 +1,4 @@
-import { FaceDetector, FilesetResolver, type Detection } from '@mediapipe/tasks-vision';
+import * as ort from 'onnxruntime-web';
 
 export type BBox = {
   x: number;
@@ -8,39 +8,109 @@ export type BBox = {
   score: number;
 };
 
-let detectorPromise: Promise<FaceDetector> | null = null;
+const MODEL_URL = '/models/yolov11n-face.onnx';
+const INPUT_SIZE = 640;
 
-async function loadDetector(): Promise<FaceDetector> {
-  const vision = await FilesetResolver.forVisionTasks(
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm',
-  );
-  return FaceDetector.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath:
-        'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
-      delegate: 'GPU',
-    },
-    runningMode: 'IMAGE',
-    minDetectionConfidence: 0.3,
-    minSuppressionThreshold: 0.3,
+// onnxruntime-web の WASM は jsdelivr CDN から取得（セルフホストより setup シンプル）
+ort.env.wasm.wasmPaths = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ort.env.versions.web}/dist/`;
+
+let sessionPromise: Promise<ort.InferenceSession> | null = null;
+
+async function loadSession(): Promise<ort.InferenceSession> {
+  return ort.InferenceSession.create(MODEL_URL, {
+    executionProviders: ['webgl', 'wasm'],
+    graphOptimizationLevel: 'all',
   });
 }
 
-export function getDetector(): Promise<FaceDetector> {
-  if (!detectorPromise) {
-    detectorPromise = loadDetector().catch((err) => {
-      detectorPromise = null;
+export function getDetector(): Promise<ort.InferenceSession> {
+  if (!sessionPromise) {
+    sessionPromise = loadSession().catch((err) => {
+      sessionPromise = null;
       throw err;
     });
   }
-  return detectorPromise;
+  return sessionPromise;
 }
 
-function toBBox(det: Detection): BBox | null {
-  const box = det.boundingBox;
-  if (!box) return null;
-  const score = det.categories?.[0]?.score ?? 0;
-  return { x: box.originX, y: box.originY, w: box.width, h: box.height, score };
+// 画像をアスペクト比を保ったまま INPUT_SIZE 正方形に letterbox
+function letterbox(img: HTMLImageElement): {
+  canvas: HTMLCanvasElement;
+  scale: number;
+  padX: number;
+  padY: number;
+} {
+  const r = Math.min(INPUT_SIZE / img.naturalWidth, INPUT_SIZE / img.naturalHeight);
+  const newW = Math.round(img.naturalWidth * r);
+  const newH = Math.round(img.naturalHeight * r);
+  const padX = Math.floor((INPUT_SIZE - newW) / 2);
+  const padY = Math.floor((INPUT_SIZE - newH) / 2);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = INPUT_SIZE;
+  canvas.height = INPUT_SIZE;
+  const ctx = canvas.getContext('2d')!;
+  // YOLO は通常 padding を灰色 (114,114,114) で埋める
+  ctx.fillStyle = 'rgb(114,114,114)';
+  ctx.fillRect(0, 0, INPUT_SIZE, INPUT_SIZE);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, padX, padY, newW, newH);
+
+  return { canvas, scale: r, padX, padY };
+}
+
+// Canvas → Float32 NCHW [1,3,H,W] (正規化 0-1, RGB)
+function canvasToTensor(canvas: HTMLCanvasElement): ort.Tensor {
+  const ctx = canvas.getContext('2d')!;
+  const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const n = canvas.width * canvas.height;
+  const out = new Float32Array(3 * n);
+  for (let i = 0; i < n; i++) {
+    out[i] = data[i * 4] / 255; // R
+    out[i + n] = data[i * 4 + 1] / 255; // G
+    out[i + 2 * n] = data[i * 4 + 2] / 255; // B
+  }
+  return new ort.Tensor('float32', out, [1, 3, canvas.height, canvas.width]);
+}
+
+// YOLOv11 出力 [1, 5, 8400] を [(cx, cy, w, h, conf), ...] にデコード → letterbox を元座標に戻す
+function decodeOutput(
+  output: ort.Tensor,
+  scale: number,
+  padX: number,
+  padY: number,
+  imgW: number,
+  imgH: number,
+  confThreshold: number,
+): BBox[] {
+  const data = output.data as Float32Array;
+  const [, channels, anchors] = output.dims as number[];
+  if (channels !== 5) {
+    throw new Error(`unexpected YOLO output channels: ${channels}`);
+  }
+  const boxes: BBox[] = [];
+  for (let i = 0; i < anchors; i++) {
+    const score = data[4 * anchors + i];
+    if (score < confThreshold) continue;
+    const cx = data[0 * anchors + i];
+    const cy = data[1 * anchors + i];
+    const w = data[2 * anchors + i];
+    const h = data[3 * anchors + i];
+    // letterbox 逆変換
+    const origX = (cx - w / 2 - padX) / scale;
+    const origY = (cy - h / 2 - padY) / scale;
+    const origW = w / scale;
+    const origH = h / scale;
+    // 画像範囲にクランプ
+    const x = Math.max(0, origX);
+    const y = Math.max(0, origY);
+    const right = Math.min(imgW, origX + origW);
+    const bottom = Math.min(imgH, origY + origH);
+    if (right <= x || bottom <= y) continue;
+    boxes.push({ x, y, w: right - x, h: bottom - y, score });
+  }
+  return boxes;
 }
 
 function iou(a: BBox, b: BBox): number {
@@ -63,113 +133,100 @@ function nonMaxSuppression(boxes: BBox[], threshold: number): BBox[] {
   return kept;
 }
 
-function createCanvas(w: number, h: number): HTMLCanvasElement {
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  return c;
-}
-
-async function detectOnCanvas(
-  detector: FaceDetector,
-  canvas: HTMLCanvasElement,
-  transform: (b: BBox) => BBox,
+async function detectOnRegion(
+  session: ort.InferenceSession,
+  img: HTMLImageElement | HTMLCanvasElement,
+  regionW: number,
+  regionH: number,
+  offsetX: number,
+  offsetY: number,
+  imgW: number,
+  imgH: number,
+  confThreshold: number,
 ): Promise<BBox[]> {
-  const result = detector.detect(canvas);
-  return result.detections
-    .map(toBBox)
-    .filter((b): b is BBox => b !== null)
-    .map(transform);
-}
-
-// 全画像を指定スケールで1パス
-async function detectFullScale(
-  detector: FaceDetector,
-  img: HTMLImageElement,
-  scale: number,
-): Promise<BBox[]> {
-  const w = Math.round(img.naturalWidth * scale);
-  const h = Math.round(img.naturalHeight * scale);
-  const canvas = createCanvas(w, h);
-  const ctx = canvas.getContext('2d')!;
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, 0, 0, w, h);
-  return detectOnCanvas(detector, canvas, (b) => ({
-    x: b.x / scale,
-    y: b.y / scale,
-    w: b.w / scale,
-    h: b.h / scale,
-    score: b.score,
-  }));
-}
-
-// タイル分割して各タイルで検出（群衆の奥の小さい顔向け）
-async function detectTiled(
-  detector: FaceDetector,
-  img: HTMLImageElement,
-  tileSize: number,
-  overlap: number,
-): Promise<BBox[]> {
-  const stride = Math.floor(tileSize * (1 - overlap));
-  const imgW = img.naturalWidth;
-  const imgH = img.naturalHeight;
-  const all: BBox[] = [];
-  const canvas = createCanvas(tileSize, tileSize);
-  const ctx = canvas.getContext('2d')!;
-
-  for (let y = 0; y < imgH; y += stride) {
-    for (let x = 0; x < imgW; x += stride) {
-      const w = Math.min(tileSize, imgW - x);
-      const h = Math.min(tileSize, imgH - y);
-      if (w < 128 || h < 128) continue;
-      canvas.width = w;
-      canvas.height = h;
-      ctx.clearRect(0, 0, w, h);
-      ctx.drawImage(img, x, y, w, h, 0, 0, w, h);
-      const boxes = await detectOnCanvas(detector, canvas, (b) => ({
-        x: b.x + x,
-        y: b.y + y,
-        w: b.w,
-        h: b.h,
-        score: b.score,
-      }));
-      all.push(...boxes);
-    }
+  // letterbox用に一時canvasに描画
+  const srcCanvas = document.createElement('canvas');
+  srcCanvas.width = regionW;
+  srcCanvas.height = regionH;
+  const srcCtx = srcCanvas.getContext('2d')!;
+  if (img instanceof HTMLImageElement) {
+    srcCtx.drawImage(img, offsetX, offsetY, regionW, regionH, 0, 0, regionW, regionH);
+  } else {
+    srcCtx.drawImage(img, 0, 0);
   }
-  return all;
+
+  // letterbox → tensor → infer
+  const srcImg = { naturalWidth: regionW, naturalHeight: regionH } as HTMLImageElement;
+  Object.defineProperty(srcImg, 'src', { value: srcCanvas.toDataURL() });
+  const r = Math.min(INPUT_SIZE / regionW, INPUT_SIZE / regionH);
+  const newW = Math.round(regionW * r);
+  const newH = Math.round(regionH * r);
+  const padX = Math.floor((INPUT_SIZE - newW) / 2);
+  const padY = Math.floor((INPUT_SIZE - newH) / 2);
+
+  const letter = document.createElement('canvas');
+  letter.width = INPUT_SIZE;
+  letter.height = INPUT_SIZE;
+  const lctx = letter.getContext('2d')!;
+  lctx.fillStyle = 'rgb(114,114,114)';
+  lctx.fillRect(0, 0, INPUT_SIZE, INPUT_SIZE);
+  lctx.imageSmoothingEnabled = true;
+  lctx.imageSmoothingQuality = 'high';
+  lctx.drawImage(srcCanvas, 0, 0, regionW, regionH, padX, padY, newW, newH);
+
+  const tensor = canvasToTensor(letter);
+  const feeds = { [session.inputNames[0]]: tensor };
+  const results = await session.run(feeds);
+  const output = results[session.outputNames[0]];
+
+  const localBoxes = decodeOutput(output, r, padX, padY, regionW, regionH, confThreshold);
+  return localBoxes.map((b) => {
+    const x = b.x + offsetX;
+    const y = b.y + offsetY;
+    return {
+      x,
+      y,
+      w: Math.min(b.w, imgW - x),
+      h: Math.min(b.h, imgH - y),
+      score: b.score,
+    };
+  });
 }
 
-// 顔として妥当かを形状・信頼度・サイズで判定（FP抑制強化）
 function isPlausibleFace(b: BBox, imgW: number, imgH: number): boolean {
   const aspect = b.w / b.h;
-  // 顔は概ね縦長気味の正方形〜縦長。横長すぎ・縦長すぎは除外
-  if (aspect < 0.62 || aspect > 1.5) return false;
+  if (aspect < 0.45 || aspect > 2.0) return false;
   const minSide = Math.min(imgW, imgH);
-  const boxMin = Math.min(b.w, b.h);
-  // サイズ下限
-  if (boxMin < minSide * 0.012) return false;
-  if (boxMin < 16) return false;
-  // 信頼度段階ゲート: 小さいほど高い信頼度を要求
-  if (boxMin < minSide * 0.02 && b.score < 0.5) return false;
-  if (boxMin < minSide * 0.035 && b.score < 0.42) return false;
-  if (b.score < 0.35) return false;
+  if (Math.min(b.w, b.h) < minSide * 0.006) return false;
+  if (Math.min(b.w, b.h) < 10) return false;
   return true;
 }
 
 export async function detectFaces(img: HTMLImageElement): Promise<BBox[]> {
-  const detector = await getDetector();
-  const maxSide = Math.max(img.naturalWidth, img.naturalHeight);
+  const session = await getDetector();
+  const imgW = img.naturalWidth;
+  const imgH = img.naturalHeight;
+  const maxSide = Math.max(imgW, imgH);
+  const confThreshold = 0.22;
+
   const all: BBox[] = [];
 
-  all.push(...(await detectFullScale(detector, img, 1)));
+  all.push(...(await detectOnRegion(session, img, imgW, imgH, 0, 0, imgW, imgH, confThreshold)));
 
-  // タイル分割で奥の小顔を拾う。小さめのタイル+高オーバーラップで小顔の相対サイズを稼ぐ
-  if (maxSide >= 1200) {
-    const tileSize = maxSide >= 2400 ? 600 : maxSide >= 1800 ? 500 : 400;
-    all.push(...(await detectTiled(detector, img, tileSize, 0.35)));
+  if (maxSide >= 1400) {
+    const tileSize = maxSide >= 2800 ? 640 : 480;
+    const overlap = 0.35;
+    const stride = Math.floor(tileSize * (1 - overlap));
+    for (let y = 0; y < imgH; y += stride) {
+      for (let x = 0; x < imgW; x += stride) {
+        const w = Math.min(tileSize, imgW - x);
+        const h = Math.min(tileSize, imgH - y);
+        if (w < 180 || h < 180) continue;
+        all.push(...(await detectOnRegion(session, img, w, h, x, y, imgW, imgH, confThreshold)));
+      }
+    }
   }
 
-  const deduped = nonMaxSuppression(all, 0.25);
-  return deduped.filter((b) => isPlausibleFace(b, img.naturalWidth, img.naturalHeight));
+  const deduped = nonMaxSuppression(all, 0.55);
+  return deduped.filter((b) => isPlausibleFace(b, imgW, imgH));
 }
