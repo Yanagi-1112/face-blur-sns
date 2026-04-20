@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# AI agent / editor local config (never publish)
+AGENTS.md
+CLAUDE.md
+.claude/
+.cursor/
+.windsurf/
+.aider*
+.continue/
