@@ -33,7 +33,7 @@ export function ImagePreview({ blurredUrl, fileName, blob, faceCount, onDownload
   };
 
   return (
-    <div className="group relative block w-full overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50">
+    <div className="group relative block w-full overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900">
       <button
         type="button"
         onClick={onDownload}

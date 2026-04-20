@@ -110,17 +110,21 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-white text-zinc-900">
+    <main className="min-h-screen">
       <div className="mx-auto w-full max-w-2xl px-4 py-10">
-        <h1 className="text-xl font-semibold mb-4">顔ぼかし</h1>
+        <h1 className="text-xl font-semibold mb-4 text-zinc-100">顔ぼかし</h1>
 
         <DropZone onFiles={processFiles} disabled={busy} />
 
-        {busy && <p className="mt-3 text-sm text-zinc-500" aria-live="polite">処理中 {progress}...</p>}
+        {busy && (
+          <p className="mt-3 text-sm text-zinc-400" aria-live="polite">
+            処理中 {progress}...
+          </p>
+        )}
 
         {!busy && lastBatchFaces !== null && (
           <p
-            className="mt-3 text-base font-medium text-emerald-700 completion-pop"
+            className="mt-3 text-base font-medium text-emerald-400 completion-pop"
             aria-live="polite"
           >
             {lastBatchFaces > 0
@@ -130,7 +134,7 @@ export default function Home() {
         )}
 
         {failures.length > 0 && (
-          <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <div className="mt-3 rounded border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-300">
             <p className="font-medium">処理できなかった画像 {failures.length}件:</p>
             <ul className="mt-1 list-disc pl-5 text-xs">
               {failures.map((f) => (
@@ -145,12 +149,12 @@ export default function Home() {
         {results.length > 0 && (
           <div className="mt-6 space-y-3">
             <div className="flex items-center justify-between">
-              <p className="text-sm text-zinc-500">{results.length}枚 · サムネイルをクリックでDL</p>
+              <p className="text-sm text-zinc-400">{results.length}枚 · サムネイルをクリックでDL</p>
               {results.length > 1 && (
                 <button
                   type="button"
                   onClick={downloadAll}
-                  className="rounded bg-black px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700"
+                  className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
                 >
                   まとめてDL (ZIP)
                 </button>

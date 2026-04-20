@@ -140,15 +140,20 @@ async function detectTiled(
   return all;
 }
 
-// 顔として妥当かを形状・信頼度・サイズで判定
+// 顔として妥当かを形状・信頼度・サイズで判定（FP抑制強化）
 function isPlausibleFace(b: BBox, imgW: number, imgH: number): boolean {
   const aspect = b.w / b.h;
-  if (aspect < 0.6 || aspect > 1.6) return false;
+  // 顔は概ね縦長気味の正方形〜縦長。横長すぎ・縦長すぎは除外
+  if (aspect < 0.62 || aspect > 1.5) return false;
   const minSide = Math.min(imgW, imgH);
-  if (Math.min(b.w, b.h) < minSide * 0.01) return false;
-  if (Math.min(b.w, b.h) < 14) return false;
-  // 信頼度が低い候補は、十分に大きい場合のみ採用（小さくて低信頼は誤検出率高）
-  if (b.score < 0.42 && Math.min(b.w, b.h) < minSide * 0.025) return false;
+  const boxMin = Math.min(b.w, b.h);
+  // サイズ下限
+  if (boxMin < minSide * 0.012) return false;
+  if (boxMin < 16) return false;
+  // 信頼度段階ゲート: 小さいほど高い信頼度を要求
+  if (boxMin < minSide * 0.02 && b.score < 0.5) return false;
+  if (boxMin < minSide * 0.035 && b.score < 0.42) return false;
+  if (b.score < 0.35) return false;
   return true;
 }
 
@@ -165,6 +170,6 @@ export async function detectFaces(img: HTMLImageElement): Promise<BBox[]> {
     all.push(...(await detectTiled(detector, img, tileSize, 0.35)));
   }
 
-  const deduped = nonMaxSuppression(all, 0.3);
+  const deduped = nonMaxSuppression(all, 0.25);
   return deduped.filter((b) => isPlausibleFace(b, img.naturalWidth, img.naturalHeight));
 }

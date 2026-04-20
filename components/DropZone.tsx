@@ -46,10 +46,10 @@ export function DropZone({ onFiles, disabled = false }: Props) {
       className={[
         'flex items-center justify-center w-full py-20 rounded-xl border-2 border-dashed cursor-pointer select-none transition-colors',
         disabled
-          ? 'border-zinc-300 bg-zinc-100 text-zinc-400 cursor-not-allowed'
+          ? 'border-zinc-800 bg-zinc-900/50 text-zinc-600 cursor-not-allowed'
           : isDragging
-            ? 'border-black bg-zinc-100 text-black'
-            : 'border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-50',
+            ? 'border-emerald-500 bg-emerald-950/40 text-emerald-300'
+            : 'border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:bg-zinc-900 hover:border-zinc-600',
       ].join(' ')}
     >
       <p className="text-base">
