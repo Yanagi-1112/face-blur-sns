@@ -38,6 +38,13 @@ fi
   sleep 3
   open "http://localhost:3000"
 ) &
+OPEN_PID=$!
+
+# 終了時にバックグラウンドのopen待機も掃除する
+cleanup() {
+  kill "$OPEN_PID" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
 
 echo ""
 echo "✓ サーバー起動中... ブラウザが自動で開きます"

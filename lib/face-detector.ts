@@ -27,7 +27,12 @@ async function loadDetector(): Promise<FaceDetector> {
 }
 
 export function getDetector(): Promise<FaceDetector> {
-  if (!detectorPromise) detectorPromise = loadDetector();
+  if (!detectorPromise) {
+    detectorPromise = loadDetector().catch((err) => {
+      detectorPromise = null;
+      throw err;
+    });
+  }
   return detectorPromise;
 }
 

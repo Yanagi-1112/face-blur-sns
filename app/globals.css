@@ -24,3 +24,13 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
+
+@keyframes completion-pop {
+  0% { opacity: 0; transform: scale(0.92); }
+  60% { opacity: 1; transform: scale(1.04); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.completion-pop { animation: completion-pop 0.45s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .completion-pop { animation: none; }
+}
