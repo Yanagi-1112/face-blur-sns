@@ -1,39 +1,62 @@
 import type { BBox } from './face-detector';
 
-function expandBox(box: BBox, factor: number, maxW: number, maxH: number): BBox {
-  const cx = box.x + box.w / 2;
-  const cy = box.y + box.h / 2;
-  const nw = box.w * factor;
-  const nh = box.h * factor;
-  const nx = Math.max(0, cx - nw / 2);
-  const ny = Math.max(0, cy - nh / 2);
-  const finalW = Math.min(nw, maxW - nx);
-  const finalH = Math.min(nh, maxH - ny);
-  return { x: nx, y: ny, w: finalW, h: finalH, score: box.score };
-}
-
 export function applyBlurToFaces(img: HTMLImageElement, boxes: BBox[]): HTMLCanvasElement {
+  const W = img.naturalWidth;
+  const H = img.naturalHeight;
+
   const canvas = document.createElement('canvas');
-  canvas.width = img.naturalWidth;
-  canvas.height = img.naturalHeight;
+  canvas.width = W;
+  canvas.height = H;
   const ctx = canvas.getContext('2d')!;
   ctx.drawImage(img, 0, 0);
 
+  if (boxes.length === 0) return canvas;
+
+  // ぼかし強度を顔の平均サイズから決定（小さい顔には弱め、大きい顔には強め）
+  const avgFaceSide = boxes.reduce((s, b) => s + Math.min(b.w, b.h), 0) / boxes.length;
+  const blurRadius = Math.max(6, avgFaceSide * 0.18);
+
+  // 全画像を一度だけぼかした版を作る
+  const blurred = document.createElement('canvas');
+  blurred.width = W;
+  blurred.height = H;
+  const bctx = blurred.getContext('2d')!;
+  bctx.filter = `blur(${blurRadius}px)`;
+  bctx.drawImage(img, 0, 0);
+  bctx.filter = 'none';
+
+  // 顔の位置にソフトなradial gradientを累積描画してマスクを作る
+  const mask = document.createElement('canvas');
+  mask.width = W;
+  mask.height = H;
+  const mctx = mask.getContext('2d')!;
   for (const box of boxes) {
-    const padded = expandBox(box, 1.08, canvas.width, canvas.height);
-    const cx = padded.x + padded.w / 2;
-    const cy = padded.y + padded.h / 2;
-    // 顔領域にフィットする正円の半径（短辺の55%程度）
-    const clipR = Math.min(padded.w, padded.h) * 0.55;
-    const blurR = Math.max(16, clipR * 0.5);
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, clipR, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.filter = `blur(${blurR}px)`;
-    ctx.drawImage(img, 0, 0);
-    ctx.restore();
+    const cx = box.x + box.w / 2;
+    const cy = box.y + box.h * 0.48; // 目鼻寄りにわずかに上げる
+    const rx = (box.w * 0.95) / 2;
+    const ry = (box.h * 0.95) / 2;
+    const maxR = Math.max(rx, ry);
+
+    const g = mctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.55, 'rgba(255,255,255,1)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+
+    mctx.save();
+    mctx.translate(cx, cy);
+    mctx.scale(rx / maxR, ry / maxR);
+    mctx.translate(-cx, -cy);
+    mctx.fillStyle = g;
+    mctx.beginPath();
+    mctx.arc(cx, cy, maxR, 0, Math.PI * 2);
+    mctx.fill();
+    mctx.restore();
   }
+
+  // ぼかしキャンバスをマスクで切り抜き、原画像に重ねる
+  bctx.globalCompositeOperation = 'destination-in';
+  bctx.drawImage(mask, 0, 0);
+  ctx.drawImage(blurred, 0, 0);
 
   return canvas;
 }
