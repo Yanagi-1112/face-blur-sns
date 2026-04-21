@@ -166,7 +166,6 @@ export default function Home() {
                   key={r.id}
                   blurredUrl={r.blurredUrl}
                   fileName={r.fileName}
-                  blob={r.blob}
                   faceCount={r.faceCount}
                   onDownload={() => downloadOne(r)}
                 />
