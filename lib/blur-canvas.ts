@@ -14,7 +14,7 @@ export function applyBlurToFaces(img: HTMLImageElement, boxes: BBox[]): HTMLCanv
 
   // ぼかし強度を顔の平均サイズから決定（小さい顔には弱め、大きい顔には強め）
   const avgFaceSide = boxes.reduce((s, b) => s + Math.min(b.w, b.h), 0) / boxes.length;
-  const blurRadius = Math.max(6, avgFaceSide * 0.18);
+  const blurRadius = Math.max(8, avgFaceSide * 0.22);
 
   // 全画像を一度だけぼかした版を作る
   const blurred = document.createElement('canvas');
@@ -33,14 +33,15 @@ export function applyBlurToFaces(img: HTMLImageElement, boxes: BBox[]): HTMLCanv
   for (const box of boxes) {
     const cx = box.x + box.w / 2;
     const cy = box.y + box.h * 0.48; // 目鼻寄りにわずかに上げる
-    const rx = (box.w * 0.95) / 2;
-    const ry = (box.h * 0.95) / 2;
+    // 顔からはみ出さないよう1.2倍に拡大（BBoxより一回り外まで包む）
+    const rx = (box.w * 1.2) / 2;
+    const ry = (box.h * 1.2) / 2;
     const maxR = Math.max(rx, ry);
 
     const g = mctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
     g.addColorStop(0, 'rgba(255,255,255,1)');
-    g.addColorStop(0.55, 'rgba(255,255,255,1)');
-    g.addColorStop(1, 'rgba(255,255,255,0)');
+    g.addColorStop(0.7, 'rgba(255,255,255,1)'); // 70%までは完全に不透明 → 顔本体を確実にカバー
+    g.addColorStop(1, 'rgba(255,255,255,0)'); // 外側30%でフェード → 柔らかさ維持
 
     mctx.save();
     mctx.translate(cx, cy);
